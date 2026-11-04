@@ -59,11 +59,47 @@ const bulletGeo = new THREE.CapsuleGeometry(0.055, 0.42, 2, 6);
 bulletGeo.rotateX(Math.PI / 2);
 const bulletMat = new THREE.MeshBasicMaterial({ color: 0xffe08a });
 const debrisGeo = new THREE.BoxGeometry(0.09, 0.09, 0.09);
+const BONUS_R = 0.28;
+const SHIELD_TIME = 7;
+const bonusGeo = new THREE.SphereGeometry(BONUS_R, 18, 14);
+const bonusMat = new THREE.MeshStandardMaterial({
+  color: 0x3dff7a,
+  emissive: 0x1fbf55,
+  emissiveIntensity: 1.35,
+  roughness: 0.32,
+  metalness: 0.04,
+});
 
 const ship = buildShip();
 scene.add(ship);
 const engineLight = new THREE.PointLight(0x7fd4ff, 3, 7, 2);
 ship.add(engineLight);
+const shieldMat = new THREE.MeshBasicMaterial({
+  color: 0x5dff8a,
+  transparent: true,
+  opacity: 0.42,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+  blending: THREE.AdditiveBlending,
+  toneMapped: false,
+});
+const shieldRingMat = new THREE.MeshBasicMaterial({
+  color: 0xd8ffe8,
+  transparent: true,
+  opacity: 0.9,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+  blending: THREE.AdditiveBlending,
+  toneMapped: false,
+});
+const shieldMesh = new THREE.Mesh(new THREE.SphereGeometry(1.15, 28, 20), shieldMat);
+const shieldRing = new THREE.Mesh(new THREE.RingGeometry(0.95, 1.22, 48), shieldRingMat);
+shieldRing.rotation.x = -Math.PI / 2;
+shieldRing.position.y = 0.06;
+shieldMesh.add(shieldRing);
+shieldMesh.visible = false;
+shieldMesh.renderOrder = 2;
+scene.add(shieldMesh);
 
 let starPositions = null;
 
@@ -71,6 +107,7 @@ const state = {
   player: null,
   bullets: [],
   rocks: [],
+  bonuses: [],
   particles: [],
   stars: [],
   score: 0,
@@ -80,6 +117,8 @@ const state = {
   mode: "menu",
   time: 0,
   spawnAcc: 0,
+  bonusAcc: 0,
+  bonusEvery: 6,
   shake: 0,
   flash: 0,
 };
@@ -191,6 +230,7 @@ function discard(list) {
 function reset() {
   discard(state.rocks);
   discard(state.bullets);
+  discard(state.bonuses);
   discard(state.particles);
   state.player = {
     x: 0,
@@ -198,11 +238,13 @@ function reset() {
     r: 0.43,
     cool: 0,
     invuln: 1.2,
+    shield: 0,
     bank: 0,
     pitch: 0,
   };
   state.bullets = [];
   state.rocks = [];
+  state.bonuses = [];
   state.particles = [];
   state.score = 0;
   state.lives = 3;
@@ -211,6 +253,8 @@ function reset() {
   state.mode = "play";
   state.time = 0;
   state.spawnAcc = 0.45;
+  state.bonusAcc = 0;
+  state.bonusEvery = 5 + Math.random() * 4;
   state.shake = 0;
   state.flash = 0;
 }
@@ -367,6 +411,39 @@ function pickTier() {
   if (state.time > 28 && roll < 0.12) return 2;
   if (state.time > 12 && roll < 0.42) return 1;
   return 0;
+}
+
+function spawnBonus() {
+  const half = FIELD_W / 2;
+  const mesh = new THREE.Mesh(bonusGeo, bonusMat);
+  scene.add(mesh);
+  state.bonuses.push({
+    category: "bonus",
+    x: -half + BONUS_R + Math.random() * (FIELD_W - BONUS_R * 2),
+    z: -FIELD_D / 2 - BONUS_R,
+    r: BONUS_R,
+    vx: (Math.random() - 0.5) * 1.2,
+    vz: 2.1,
+    alive: true,
+    mesh,
+    sharedGeometry: true,
+    sharedMaterial: true,
+  });
+}
+
+function collectBonus(bonus) {
+  bonus.alive = false;
+  state.player.shield = SHIELD_TIME;
+  burst(bonus.x, bonus.z, "#5dff8a", 12);
+}
+
+function separateRock(player, rock) {
+  const dx = rock.x - player.x;
+  const dz = rock.z - player.z;
+  const dist = Math.hypot(dx, dz) || 0.001;
+  const gap = player.r + rock.r + 0.08;
+  rock.x = player.x + (dx / dist) * gap;
+  rock.z = player.z + (dz / dist) * gap;
 }
 
 function spawnFromTop() {
@@ -527,6 +604,7 @@ function update(dt) {
   const player = state.player;
   player.cool = Math.max(0, player.cool - dt);
   player.invuln = Math.max(0, player.invuln - dt);
+  player.shield = Math.max(0, player.shield - dt);
 
   let mx = 0;
   let mz = 0;
@@ -596,16 +674,42 @@ function update(dt) {
     }
   }
 
-  if (player.invuln <= 0) {
-    for (const rock of state.rocks) {
-      if (!rock.alive) continue;
-      const dx = player.x - rock.x;
-      const dz = player.z - rock.z;
-      if (dx * dx + dz * dz <= (player.r + rock.r) * (player.r + rock.r)) {
-        hurt();
-        break;
-      }
+  for (const bonus of state.bonuses) {
+    bonus.x += bonus.vx * dt;
+    bonus.z += bonus.vz * dt;
+    if (bonus.x < -halfW + bonus.r) {
+      bonus.x = -halfW + bonus.r;
+      bonus.vx = Math.abs(bonus.vx) || 0.4;
+    } else if (bonus.x > halfW - bonus.r) {
+      bonus.x = halfW - bonus.r;
+      bonus.vx = -Math.abs(bonus.vx) || -0.4;
     }
+    if (bonus.z > halfD + 1) bonus.alive = false;
+    const dx = player.x - bonus.x;
+    const dz = player.z - bonus.z;
+    if (dx * dx + dz * dz <= (player.r + bonus.r) * (player.r + bonus.r)) collectBonus(bonus);
+  }
+
+  for (const rock of state.rocks) {
+    if (!rock.alive) continue;
+    const dx = player.x - rock.x;
+    const dz = player.z - rock.z;
+    if (dx * dx + dz * dz > (player.r + rock.r) * (player.r + rock.r)) continue;
+    if (player.shield > 0) {
+      separateRock(player, rock);
+      continue;
+    }
+    if (player.invuln <= 0) {
+      hurt();
+      break;
+    }
+  }
+
+  state.bonusAcc += dt;
+  if (state.bonusAcc >= state.bonusEvery && !state.bonuses.some((bonus) => bonus.alive)) {
+    state.bonusAcc = 0;
+    state.bonusEvery = 8 + Math.random() * 6;
+    spawnBonus();
   }
 
   state.spawnAcc += dt;
@@ -625,6 +729,11 @@ function update(dt) {
     dropMesh(rock);
     return false;
   });
+  state.bonuses = state.bonuses.filter((bonus) => {
+    if (bonus.alive) return true;
+    dropMesh(bonus);
+    return false;
+  });
 }
 
 function syncScene() {
@@ -638,6 +747,16 @@ function syncScene() {
   flame.scale.set(1, 1, 0.65 + Math.sin(state.time * 42) * 0.32);
   const blink = state.mode === "play" && player.invuln > 0 && Math.floor(state.time * 14) % 2 === 0;
   ship.visible = !blink;
+  const pulse = 0.5 + Math.sin(state.time * 9) * 0.5;
+  shieldMesh.visible = player.shield > 0 && state.mode === "play";
+  shieldMesh.position.set(player.x, 0.12, player.z);
+  shieldMat.opacity = 0.28 + pulse * 0.22;
+  shieldRingMat.opacity = 0.55 + pulse * 0.4;
+
+  for (const bonus of state.bonuses) {
+    bonus.mesh.position.set(bonus.x, Math.sin(state.time * 3 + bonus.x) * 0.12, bonus.z);
+    bonus.mesh.rotation.y = state.time * 1.4;
+  }
 
   for (const rock of state.rocks) {
     rock.mesh.position.set(rock.x, 0, rock.z);
@@ -892,4 +1011,4 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.game = { state, held, reset, spawnRock };
+window.game = { state, held, reset, spawnRock, spawnBonus };
