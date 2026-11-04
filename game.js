@@ -69,6 +69,55 @@ const bonusMat = new THREE.MeshStandardMaterial({
   roughness: 0.32,
   metalness: 0.04,
 });
+const sideBulletGeo = new THREE.CapsuleGeometry(0.034, 0.24, 2, 5);
+sideBulletGeo.rotateX(Math.PI / 2);
+const sideBulletMat = new THREE.MeshBasicMaterial({ color: 0xb7e6ff, toneMapped: false });
+const CANNON_X = 0.44;
+const ROCK_DROP_CHANCE = 0.2;
+const cannonBarrelGeo = new THREE.CylinderGeometry(0.042, 0.058, 0.34, 8);
+cannonBarrelGeo.rotateX(-Math.PI / 2);
+const cannonPodGeo = new THREE.SphereGeometry(0.072, 10, 8);
+const cannonMat = new THREE.MeshStandardMaterial({
+  color: 0xd7e4f2,
+  roughness: 0.28,
+  metalness: 0.64,
+  emissive: 0x1c4e72,
+  emissiveIntensity: 0.7,
+});
+const pickupGeo = new THREE.OctahedronGeometry(0.24, 0);
+const cannonPickupMat = new THREE.MeshStandardMaterial({
+  color: 0x8fd4ff,
+  emissive: 0x2f8fd6,
+  emissiveIntensity: 1.4,
+  roughness: 0.25,
+  metalness: 0.15,
+});
+
+const BONUS_DEFS = {
+  shield: {
+    family: "effect",
+    fromRock: false,
+    geometry: bonusGeo,
+    material: bonusMat,
+    burst: "#5dff8a",
+    apply(player) {
+      player.shield = SHIELD_TIME;
+    },
+  },
+  cannons: {
+    family: "weapon",
+    fromRock: true,
+    geometry: pickupGeo,
+    material: cannonPickupMat,
+    burst: "#8fd4ff",
+    owned(player) {
+      return player.weapons.has("cannons");
+    },
+    apply(player) {
+      player.weapons.add("cannons");
+    },
+  },
+};
 
 const ship = buildShip();
 scene.add(ship);
@@ -175,7 +224,19 @@ function buildShip() {
   );
   flame.position.z = 0.62;
   flame.name = "flame";
-  group.add(body, edges, flame);
+  group.add(body, edges, flame, makeSideCannon(-1), makeSideCannon(1));
+  return group;
+}
+
+function makeSideCannon(side) {
+  const group = new THREE.Group();
+  group.name = side < 0 ? "cannon-port" : "cannon-starboard";
+  const barrel = new THREE.Mesh(cannonBarrelGeo, cannonMat);
+  const pod = new THREE.Mesh(cannonPodGeo, cannonMat);
+  pod.position.z = 0.12;
+  group.add(pod, barrel);
+  group.position.set(side * CANNON_X, 0.03, 0.06);
+  group.visible = false;
   return group;
 }
 
@@ -211,15 +272,25 @@ function makeStars() {
   ));
 }
 
+function releaseObject(object, sharedGeometry, sharedMaterial) {
+  object.removeFromParent();
+  for (const child of [...object.children]) {
+    releaseObject(child, !!child.userData.sharedGeometry, !!child.userData.sharedMaterial);
+  }
+  const material = object.material;
+  if (material && !sharedMaterial) {
+    const list = Array.isArray(material) ? material : [material];
+    for (const entry of list) {
+      if (entry.map) entry.map.dispose();
+      entry.dispose();
+    }
+  }
+  if (object.geometry && !sharedGeometry) object.geometry.dispose();
+}
+
 function dropMesh(actor) {
   if (!actor.mesh) return;
-  actor.mesh.removeFromParent();
-  const material = actor.mesh.material;
-  if (material && !actor.sharedMaterial) {
-    if (material.map) material.map.dispose();
-    material.dispose();
-  }
-  if (actor.mesh.geometry && !actor.sharedGeometry) actor.mesh.geometry.dispose();
+  releaseObject(actor.mesh, !!actor.sharedGeometry, !!actor.sharedMaterial);
   actor.mesh = null;
 }
 
@@ -239,6 +310,7 @@ function reset() {
     cool: 0,
     invuln: 1.2,
     shield: 0,
+    weapons: new Set(),
     bank: 0,
     pitch: 0,
   };
@@ -254,7 +326,7 @@ function reset() {
   state.time = 0;
   state.spawnAcc = 0.45;
   state.bonusAcc = 0;
-  state.bonusEvery = 5 + Math.random() * 4;
+  state.bonusEvery = 14 + Math.random() * 8;
   state.shake = 0;
   state.flash = 0;
 }
@@ -387,7 +459,7 @@ function makeRockMesh(radius) {
   return mesh;
 }
 
-function spawnRock(x, z, tier, vx, vz) {
+function spawnRock(x, z, tier, vx, vz, drop = null) {
   const spec = TIERS[tier];
   const rock = {
     x,
@@ -399,11 +471,34 @@ function spawnRock(x, z, tier, vx, vz) {
     rot: Math.random() * Math.PI * 2,
     spin: (Math.random() - 0.5) * 1.6,
     tumble: Math.random() * Math.PI * 2,
+    drop,
+    marker: null,
     alive: true,
     mesh: makeRockMesh(spec.r),
   };
+  if (drop) attachDropMarker(rock);
   state.rocks.push(rock);
   return rock;
+}
+
+function attachDropMarker(rock) {
+  const def = BONUS_DEFS[rock.drop];
+  const marker = new THREE.Mesh(def.geometry, def.material);
+  marker.scale.setScalar(0.72);
+  marker.position.y = rock.r * 0.92;
+  marker.userData.sharedGeometry = true;
+  marker.userData.sharedMaterial = true;
+  rock.mesh.add(marker);
+  rock.marker = marker;
+}
+
+function rollRockDrop() {
+  const kinds = Object.keys(BONUS_DEFS).filter((kind) => {
+    const def = BONUS_DEFS[kind];
+    return def.fromRock && !(def.owned && def.owned(state.player));
+  });
+  if (!kinds.length || Math.random() > ROCK_DROP_CHANCE) return null;
+  return kinds[Math.floor(Math.random() * kinds.length)];
 }
 
 function pickTier() {
@@ -413,17 +508,19 @@ function pickTier() {
   return 0;
 }
 
-function spawnBonus() {
-  const half = FIELD_W / 2;
-  const mesh = new THREE.Mesh(bonusGeo, bonusMat);
+function spawnPickup(kind, x, z, vx, vz) {
+  const def = BONUS_DEFS[kind];
+  const mesh = new THREE.Mesh(def.geometry, def.material);
   scene.add(mesh);
   state.bonuses.push({
     category: "bonus",
-    x: -half + BONUS_R + Math.random() * (FIELD_W - BONUS_R * 2),
-    z: -FIELD_D / 2 - BONUS_R,
+    kind,
+    family: def.family,
+    x,
+    z,
     r: BONUS_R,
-    vx: (Math.random() - 0.5) * 1.2,
-    vz: 2.1,
+    vx,
+    vz,
     alive: true,
     mesh,
     sharedGeometry: true,
@@ -431,10 +528,29 @@ function spawnBonus() {
   });
 }
 
+function spawnBonus() {
+  const half = FIELD_W / 2;
+  spawnPickup(
+    "shield",
+    -half + BONUS_R + Math.random() * (FIELD_W - BONUS_R * 2),
+    -FIELD_D / 2 - BONUS_R,
+    (Math.random() - 0.5) * 1.2,
+    2.1
+  );
+}
+
 function collectBonus(bonus) {
   bonus.alive = false;
-  state.player.shield = SHIELD_TIME;
-  burst(bonus.x, bonus.z, "#5dff8a", 12);
+  const def = BONUS_DEFS[bonus.kind];
+  if (def) def.apply(state.player);
+  burst(bonus.x, bonus.z, def ? def.burst : "#ffffff", 12);
+}
+
+function releaseDrop(rock) {
+  if (!rock.drop) return;
+  const kind = rock.drop;
+  rock.drop = null;
+  spawnPickup(kind, rock.x, rock.z, (Math.random() - 0.5) * 0.7, 1.2);
 }
 
 function separateRock(player, rock) {
@@ -456,7 +572,8 @@ function spawnFromTop() {
     -FIELD_D / 2 - spec.r,
     tier,
     (Math.random() - 0.5) * 1.6,
-    spec.speed * difficulty
+    spec.speed * difficulty,
+    rollRockDrop()
   );
 }
 
@@ -489,6 +606,7 @@ function burst(x, z, color, count) {
 
 function destroyRock(rock) {
   rock.alive = false;
+  releaseDrop(rock);
   state.score += TIERS[rock.tier].score;
   burst(rock.x, rock.z, TIERS[rock.tier].edge, 8 + rock.tier * 2);
   if (rock.tier >= 2) return;
@@ -544,6 +662,29 @@ function movingDown() {
 }
 function firing() {
   return held.has("Space") || held.has(" ");
+}
+
+function emitBullet(x, z, geometry, material, radius) {
+  const mesh = new THREE.Mesh(geometry, material);
+  scene.add(mesh);
+  state.bullets.push({
+    x,
+    z,
+    z0: z,
+    r: radius,
+    vz: -BULLET_SPEED,
+    alive: true,
+    mesh,
+    sharedGeometry: true,
+    sharedMaterial: true,
+  });
+}
+
+function fireWeapons(player) {
+  emitBullet(player.x, player.z - 0.7, bulletGeo, bulletMat, 0.1);
+  if (!player.weapons.has("cannons")) return;
+  emitBullet(player.x - CANNON_X, player.z - 0.22, sideBulletGeo, sideBulletMat, 0.07);
+  emitBullet(player.x + CANNON_X, player.z - 0.22, sideBulletGeo, sideBulletMat, 0.07);
 }
 
 function segmentHitsCircle(x0, z0, x1, z1, cx, cz, radius) {
@@ -626,19 +767,7 @@ function update(dt) {
 
   if (firing() && player.cool <= 0) {
     player.cool = FIRE_COOLDOWN;
-    const mesh = new THREE.Mesh(bulletGeo, bulletMat);
-    scene.add(mesh);
-    state.bullets.push({
-      x: player.x,
-      z: player.z - 0.7,
-      z0: player.z - 0.7,
-      r: 0.1,
-      vz: -BULLET_SPEED,
-      alive: true,
-      mesh,
-      sharedGeometry: true,
-      sharedMaterial: true,
-    });
+    fireWeapons(player);
   }
 
   for (const bullet of state.bullets) {
@@ -705,11 +834,14 @@ function update(dt) {
     }
   }
 
-  state.bonusAcc += dt;
-  if (state.bonusAcc >= state.bonusEvery && !state.bonuses.some((bonus) => bonus.alive)) {
-    state.bonusAcc = 0;
-    state.bonusEvery = 8 + Math.random() * 6;
-    spawnBonus();
+  const shieldOnField = state.bonuses.some((bonus) => bonus.alive && bonus.kind === "shield");
+  if (!shieldOnField) {
+    state.bonusAcc += dt;
+    if (state.bonusAcc >= state.bonusEvery) {
+      state.bonusAcc = 0;
+      state.bonusEvery = 20 + Math.random() * 14;
+      spawnBonus();
+    }
   }
 
   state.spawnAcc += dt;
@@ -747,6 +879,9 @@ function syncScene() {
   flame.scale.set(1, 1, 0.65 + Math.sin(state.time * 42) * 0.32);
   const blink = state.mode === "play" && player.invuln > 0 && Math.floor(state.time * 14) % 2 === 0;
   ship.visible = !blink;
+  const armed = player.weapons.has("cannons");
+  ship.getObjectByName("cannon-port").visible = armed;
+  ship.getObjectByName("cannon-starboard").visible = armed;
   const pulse = 0.5 + Math.sin(state.time * 9) * 0.5;
   shieldMesh.visible = player.shield > 0 && state.mode === "play";
   shieldMesh.position.set(player.x, 0.12, player.z);
@@ -761,6 +896,10 @@ function syncScene() {
   for (const rock of state.rocks) {
     rock.mesh.position.set(rock.x, 0, rock.z);
     rock.mesh.rotation.set(rock.tumble + rock.rot * 0.35, rock.rot, rock.rot * 0.2);
+    if (rock.marker) {
+      rock.marker.rotation.y = state.time * 2.8;
+      rock.marker.position.y = rock.r * 0.92 + Math.sin(state.time * 4 + rock.x) * 0.05;
+    }
   }
   for (const bullet of state.bullets) {
     bullet.mesh.position.set(bullet.x, 0, bullet.z);
@@ -1011,4 +1150,4 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.game = { state, held, reset, spawnRock, spawnBonus };
+window.game = { state, held, reset, spawnRock, spawnBonus, spawnPickup };
