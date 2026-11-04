@@ -5,6 +5,7 @@ const FIELD_D = 24;
 const SHIP_SPEED = 10;
 const BULLET_SPEED = 21.3;
 const FIRE_COOLDOWN = 0.14;
+const HITS_PER_LIFE = 3;
 
 const TIERS = [
   { r: 1.15, speed: 1.95, score: 20, edge: "#d5cdc0" },
@@ -17,6 +18,9 @@ const canvas = document.getElementById("game");
 const hud = document.getElementById("hud");
 const hudScore = document.getElementById("hud-score");
 const hudLives = document.getElementById("hud-lives");
+const healthMeter = document.getElementById("health");
+const healthFill = document.getElementById("health-fill");
+const healthLabel = document.getElementById("health-label");
 const hudHelp = document.getElementById("hud-help");
 const flash = document.getElementById("flash");
 const held = new Set();
@@ -71,6 +75,7 @@ const state = {
   stars: [],
   score: 0,
   lives: 3,
+  health: HITS_PER_LIFE,
   over: false,
   mode: "menu",
   time: 0,
@@ -201,6 +206,7 @@ function reset() {
   state.particles = [];
   state.score = 0;
   state.lives = 3;
+  state.health = HITS_PER_LIFE;
   state.over = false;
   state.mode = "play";
   state.time = 0;
@@ -427,13 +433,24 @@ function destroyRock(rock) {
   }
 }
 
+function healthPercent() {
+  return Math.round((Math.max(0, state.health) / HITS_PER_LIFE) * 100);
+}
+
 function hurt() {
-  state.lives -= 1;
+  state.health -= 1;
   state.shake = 11;
   state.flash = 0.28;
   state.player.invuln = 1.45;
   burst(state.player.x, state.player.z, "#f4f0e6", 14);
-  if (state.lives <= 0) finishGame();
+  if (state.health > 0) return;
+  state.lives -= 1;
+  if (state.lives <= 0) {
+    state.health = 0;
+    finishGame();
+    return;
+  }
+  state.health = HITS_PER_LIFE;
 }
 
 function movingLeft() {
@@ -643,6 +660,19 @@ function syncScene() {
   camera.lookAt(player.x * 0.12, 0, player.z - 7.5);
 }
 
+function makeLifeIcon() {
+  const mark = document.createElement("span");
+  mark.className = "life";
+  mark.innerHTML = '<svg viewBox="0 0 20 24" aria-hidden="true"><path d="M10 1.2 L17.6 22.6 L10 17 L2.4 22.6 Z" fill="#f7f4ec" stroke="#7fd4ff" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+  return mark;
+}
+
+function healthColor(percent) {
+  if (percent > 60) return "#7ddea0";
+  if (percent > 30) return "#f0c14a";
+  return "#e15b4a";
+}
+
 function renderHud() {
   flash.style.opacity = String(Math.max(0, state.flash * 0.85));
   if (state.mode === "menu") return;
@@ -651,13 +681,14 @@ function renderHud() {
   const lives = hudLives.childElementCount;
   if (lives !== state.lives) {
     hudLives.replaceChildren();
-    for (let i = 0; i < state.lives; i++) {
-      const mark = document.createElement("span");
-      mark.className = "life";
-      hudLives.append(mark);
-    }
+    for (let i = 0; i < state.lives; i++) hudLives.append(makeLifeIcon());
+    hudLives.setAttribute("aria-label", "Lives: " + state.lives);
   }
-  flash.style.opacity = String(Math.max(0, state.flash * 0.85));
+  const percent = healthPercent();
+  healthFill.style.width = percent + "%";
+  healthFill.style.background = healthColor(percent);
+  healthLabel.textContent = percent + "%";
+  healthMeter.setAttribute("aria-valuenow", String(percent));
 }
 
 function render() {
