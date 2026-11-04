@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zenamax</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="stage">
+    <canvas id="game" tabindex="0" aria-label="Zenamax. Move with the arrow keys or WASD. Hold space to fire."></canvas>
+    <div id="vignette"></div>
+    <div id="flash"></div>
+    <div id="hud" hidden>
+      <div class="hud-top">
+        <span id="hud-score">000000</span>
+        <span class="hud-title">ZENAMAX</span>
+        <span id="hud-lives" aria-label="Lives"></span>
+      </div>
+      <p id="hud-help">arrows · wasd / zqsd &nbsp;&nbsp; space to fire</p>
+    </div>
+    <section id="menu" class="overlay">
+      <div class="sheet">
+        <h1>ZENAMAX</h1>
+        <p class="blurb">Arrows or WASD to move. Hold space to fire.</p>
+        <button id="start" type="button">Start game</button>
+        <div class="table-wrap">
+          <table>
+            <caption>High scores</caption>
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Name</th>
+                <th scope="col">Score</th>
+              </tr>
+            </thead>
+            <tbody id="score-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+    <section id="gameover" class="overlay" hidden>
+      <div class="sheet">
+        <h1>GAME OVER</h1>
+        <p id="final-score" class="final-score">000000</p>
+        <form id="name-form">
+          <label for="pilot-name">Name on the high score table</label>
+          <input id="pilot-name" name="pilot" maxlength="12" autocomplete="nickname" spellcheck="false">
+          <button type="submit">Save name</button>
+        </form>
+        <p id="score-note" class="note"></p>
+        <div class="actions">
+          <button id="again" type="button">Play again</button>
+          <button id="back" class="secondary" type="button">Main menu</button>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script type="module" src="game.js"></script>
+</body>
+</html>
