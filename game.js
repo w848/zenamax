@@ -62,6 +62,8 @@ const debrisGeo = new THREE.BoxGeometry(0.09, 0.09, 0.09);
 const BONUS_R = 0.28;
 const SHIELD_TIME = 7;
 const CANNON_TIME = 15;
+const WEAPON_TIME = CANNON_TIME;
+const COLUMN_X = 0.62;
 const bonusGeo = new THREE.SphereGeometry(BONUS_R, 18, 14);
 const bonusMat = new THREE.MeshStandardMaterial({
   color: 0x3dff7a,
@@ -93,6 +95,25 @@ const cannonPickupMat = new THREE.MeshStandardMaterial({
   roughness: 0.25,
   metalness: 0.15,
 });
+const columnBulletMat = new THREE.MeshBasicMaterial({ color: 0x5dff8a, toneMapped: false });
+const columnPickupGeo = new THREE.TorusGeometry(0.16, 0.055, 10, 20);
+columnPickupGeo.rotateX(-Math.PI / 2);
+const columnPickupMat = new THREE.MeshStandardMaterial({
+  color: 0x3dff7a,
+  emissive: 0x18c85a,
+  emissiveIntensity: 1.45,
+  roughness: 0.3,
+  metalness: 0.08,
+});
+const columnRodGeo = new THREE.CylinderGeometry(0.032, 0.04, 0.26, 6);
+columnRodGeo.rotateX(-Math.PI / 2);
+const columnRodMat = new THREE.MeshStandardMaterial({
+  color: 0xd8ffe8,
+  emissive: 0x1fbf55,
+  emissiveIntensity: 1.15,
+  roughness: 0.28,
+  metalness: 0.25,
+});
 
 const BONUS_DEFS = {
   shield: {
@@ -118,7 +139,23 @@ const BONUS_DEFS = {
     },
     apply(player) {
       player.weapons.add("cannons");
-      player.weaponTime.cannons = CANNON_TIME;
+      player.weaponTime.cannons = WEAPON_TIME;
+    },
+  },
+  columns: {
+    family: "weapon",
+    fromRock: true,
+    geometry: columnPickupGeo,
+    material: columnPickupMat,
+    burst: "#5dff8a",
+    duration: WEAPON_TIME,
+    lostOnHit: true,
+    owned(player) {
+      return player.weapons.has("columns");
+    },
+    apply(player) {
+      player.weapons.add("columns");
+      player.weaponTime.columns = WEAPON_TIME;
     },
   },
 };
@@ -228,7 +265,7 @@ function buildShip() {
   );
   flame.position.z = 0.62;
   flame.name = "flame";
-  group.add(body, edges, flame, makeSideCannon(-1), makeSideCannon(1));
+  group.add(body, edges, flame, makeSideCannon(-1), makeSideCannon(1), makeColumnMounts());
   return group;
 }
 
@@ -240,6 +277,18 @@ function makeSideCannon(side) {
   pod.position.z = 0.12;
   group.add(pod, barrel);
   group.position.set(side * CANNON_X, 0.03, 0.06);
+  group.visible = false;
+  return group;
+}
+
+function makeColumnMounts() {
+  const group = new THREE.Group();
+  group.name = "columns";
+  for (const x of [-COLUMN_X, 0, COLUMN_X]) {
+    const rod = new THREE.Mesh(columnRodGeo, columnRodMat);
+    rod.position.set(x, 0.05, -0.16);
+    group.add(rod);
+  }
   group.visible = false;
   return group;
 }
@@ -703,7 +752,13 @@ function emitBullet(x, z, geometry, material, radius) {
 }
 
 function fireWeapons(player) {
-  emitBullet(player.x, player.z - 0.7, bulletGeo, bulletMat, 0.1);
+  if (player.weapons.has("columns")) {
+    for (const x of [-COLUMN_X, 0, COLUMN_X]) {
+      emitBullet(player.x + x, player.z - 0.55, bulletGeo, columnBulletMat, 0.1);
+    }
+  } else {
+    emitBullet(player.x, player.z - 0.7, bulletGeo, bulletMat, 0.1);
+  }
   if (!player.weapons.has("cannons")) return;
   emitBullet(player.x - CANNON_X, player.z - 0.22, sideBulletGeo, sideBulletMat, 0.07);
   emitBullet(player.x + CANNON_X, player.z - 0.22, sideBulletGeo, sideBulletMat, 0.07);
@@ -905,6 +960,7 @@ function syncScene() {
   const armed = player.weapons.has("cannons");
   ship.getObjectByName("cannon-port").visible = armed;
   ship.getObjectByName("cannon-starboard").visible = armed;
+  ship.getObjectByName("columns").visible = player.weapons.has("columns");
   const pulse = 0.5 + Math.sin(state.time * 9) * 0.5;
   shieldMesh.visible = player.shield > 0 && state.mode === "play";
   shieldMesh.position.set(player.x, 0.12, player.z);
