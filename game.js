@@ -61,6 +61,7 @@ const bulletMat = new THREE.MeshBasicMaterial({ color: 0xffe08a });
 const debrisGeo = new THREE.BoxGeometry(0.09, 0.09, 0.09);
 const BONUS_R = 0.28;
 const SHIELD_TIME = 7;
+const CANNON_TIME = 15;
 const bonusGeo = new THREE.SphereGeometry(BONUS_R, 18, 14);
 const bonusMat = new THREE.MeshStandardMaterial({
   color: 0x3dff7a,
@@ -110,11 +111,14 @@ const BONUS_DEFS = {
     geometry: pickupGeo,
     material: cannonPickupMat,
     burst: "#8fd4ff",
+    duration: CANNON_TIME,
+    lostOnHit: true,
     owned(player) {
       return player.weapons.has("cannons");
     },
     apply(player) {
       player.weapons.add("cannons");
+      player.weaponTime.cannons = CANNON_TIME;
     },
   },
 };
@@ -311,6 +315,7 @@ function reset() {
     invuln: 1.2,
     shield: 0,
     weapons: new Set(),
+    weaponTime: {},
     bank: 0,
     pitch: 0,
   };
@@ -632,7 +637,24 @@ function healthPercent() {
   return Math.round((Math.max(0, state.health) / HITS_PER_LIFE) * 100);
 }
 
+function clearWeapon(player, kind) {
+  player.weapons.delete(kind);
+  delete player.weaponTime[kind];
+}
+
+function tickWeapons(player, dt) {
+  for (const kind of [...player.weapons]) {
+    const def = BONUS_DEFS[kind];
+    if (!def || def.duration == null) continue;
+    player.weaponTime[kind] = (player.weaponTime[kind] || 0) - dt;
+    if (player.weaponTime[kind] <= 0) clearWeapon(player, kind);
+  }
+}
+
 function hurt() {
+  for (const kind of [...state.player.weapons]) {
+    if (BONUS_DEFS[kind] && BONUS_DEFS[kind].lostOnHit) clearWeapon(state.player, kind);
+  }
   state.health -= 1;
   state.shake = 11;
   state.flash = 0.28;
@@ -746,6 +768,7 @@ function update(dt) {
   player.cool = Math.max(0, player.cool - dt);
   player.invuln = Math.max(0, player.invuln - dt);
   player.shield = Math.max(0, player.shield - dt);
+  tickWeapons(player, dt);
 
   let mx = 0;
   let mz = 0;
