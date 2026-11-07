@@ -13,7 +13,15 @@
     <div id="flash"></div>
     <div id="hud" hidden>
       <div class="hud-top">
-        <span id="hud-score">000000</span>
+        <div class="hud-left">
+          <span id="hud-score">000000</span>
+          <div class="health-row">
+            <div id="health" class="health" role="meter" aria-label="Health" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+              <div id="health-fill"></div>
+            </div>
+            <span id="health-label">100%</span>
+          </div>
+        </div>
         <span class="hud-title">ZENAMAX</span>
         <span id="hud-lives" aria-label="Lives"></span>
       </div>
